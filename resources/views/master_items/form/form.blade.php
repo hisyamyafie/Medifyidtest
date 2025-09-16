@@ -1,4 +1,4 @@
-<form method="POST">
+<form method="POST" enctype="multipart/form-data">
     @csrf
     @if($method == 'edit')
     <div class="form-group">
@@ -22,7 +22,9 @@
         <input type="number" class="form-control" name="laba" required  value="{{$item->laba ?? ''}}">
     </div>
 
-    @php $selected = $item->supplier ?? ''; @endphp
+    @php 
+    $selected = is_object($item) ? ($item->supplier ?? '') : '';
+    @endphp
     <div class="form-group">
         <label>Supplier</label>
         <select class="form-control" required name="supplier">
@@ -35,7 +37,9 @@
         </select>
     </div>
 
-    @php $selected = $item->jenis ?? ''; @endphp
+    @php 
+    $selected = is_object($item) ? ($item->supplier ?? '') : '';
+    @endphp
     <div class="form-group">
         <label>Jenis</label>
         <select class="form-control" required name="jenis">
@@ -46,6 +50,21 @@
             <optio @if($selected == 'Umum') selected @endif>Umum</option>
             <optio @if($selected == 'ATK') selected @endif>ATK</option>
         </select>
+    </div>
+
+    <div class="form-group">
+        <label>Gambar Produk</label>
+        <input type="file" class="form-control" name="image" accept="image/*">
+
+        @if($item && is_object($item) && $item->image)
+            <div class="mt-2">
+                <img src="{{asset('storage/master_items/' . $item->image)}}"
+                    alt="Product Image"
+                    style="max-width: 200px; max-height: 200px;">
+                <a href="{{url('master-items/delete-image')}}/{{$item->id}}" 
+                    class="btn btn-danger btn-sm ml-2">Hapus Gambar</a>
+            </div>
+        @endif
     </div>
 
     <button class="btn btn-primary mt-3">Submit</button>

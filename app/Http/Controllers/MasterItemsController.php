@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\MasterItem;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class MasterItemsController extends Controller
 {
@@ -14,30 +16,73 @@ class MasterItemsController extends Controller
 
     public function search(Request $request)
     {
-        $kode = $request->kode;
-        $nama = $request->nama;
-        $hargamin = $request->hargamin;
-        $hargamax = $request->hargamax;
+        // log incoming params for easier debugging
+        Log::debug('MasterItemsController@search', $request->only(['kode','nama','hargamin','hargamax']));
 
-        $data_search = MasterItem::query();
+        try {
+            $kode = $request->input('kode', null);
+            $nama = $request->input('nama', null);
+            $hargamin = $request->input('hargamin', null);
+            $hargamax = $request->input('hargamax', null);
 
-        if (!empty($kode)) $data_search = $data_search->where('kode', $kode);
-        if (!empty($nama)) $data_search = $data_search->where('nama', 'LIKE', '%' . $nama . '%');
-        if (!empty($hargamin)) $data_search = $data_search->where('harga_beli', '>=', $hargamin)->where('harga_beli', '<=', $hargamax);
+            $query = MasterItem::query();
 
-        $data_search = $data_search->select('kode', 'nama', 'jenis', 'harga_beli', 'laba', 'supplier')->orderBy('id')->get();
+            // Filter by kode if provided
+            if (!is_null($kode) && $kode !== '') {
+                $query->where('kode', $kode);
+            }
 
+            // Filter by nama if provided
+            if (!is_null($nama) && $nama !== '') {
+                $query->where('nama', 'LIKE', '%' . $nama . '%');
+            }
 
-        return json_encode([
-            'status' => 200,
-            'data' => $data_search
-        ]);
+            // Normalize harga inputs to numbers when possible
+            $min = is_numeric($hargamin) ? floatval($hargamin) : null;
+            $max = is_numeric($hargamax) ? floatval($hargamax) : null;
+
+            // Apply price filtering safely
+            if (!is_null($min) && !is_null($max)) {
+                // If user accidentally swapped min/max, swap them
+                if ($min > $max) {
+                    [$min, $max] = [$max, $min];
+                }
+                $query->whereBetween('harga_beli', [$min, $max]);
+            } elseif (!is_null($min)) {
+                $query->where('harga_beli', '>=', $min);
+            } elseif (!is_null($max)) {
+                $query->where('harga_beli', '<=', $max);
+            }
+
+            // Select required columns and ensure consistent ordering
+            $results = $query
+                ->select('kode', 'nama', 'jenis', 'harga_beli', 'laba', 'supplier', 'image')
+                ->orderBy('kode')
+                ->get();
+
+            return response()->json([
+                'status' => 200,
+                'data' => $results
+            ], 200);
+        } catch (\Throwable $e) {
+            // Log full error and return 500 with message for frontend
+            Log::error('Search Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+
+            return response()->json([
+                'status' => 500,
+                'message' => 'Internal Server Error',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     public function formView($method, $id = 0)
     {
         if ($method == 'new') {
-            $item = [];
+            $item = null;
         } else {
             $item = MasterItem::find($id);
         }
@@ -54,6 +99,10 @@ class MasterItemsController extends Controller
 
     public function formSubmit(Request $request, $method, $id = 0)
     {
+        $request->validate([
+            'image' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048' 
+        ]);
+
         if ($method == 'new') {
             $data_item = new MasterItem;
             $kode = MasterItem::count('id');
@@ -65,6 +114,18 @@ class MasterItemsController extends Controller
             $kode = $data_item->kode;
         }
 
+        //image upload handle
+        if ($request->hasFile('image')) {
+            //menghapus gambar lama jika ada
+            if ($data_item->image && Storage::exists('public/master_items/' . $data_item->image)) {
+                Storage::delete('public/master_items/' . $data_item->image);
+            }
+            //upload gambar baru
+            $imageName = $kode . '_' . time() . '.' . $request->image->extension();
+            $request->image->storeAs('public/master_items', $imageName);
+            $data_item->image = $imageName;
+        }
+
         $data_item->nama = $request->nama;
         $data_item->harga_beli = $request->harga_beli;
         $data_item->laba = $request->laba;
@@ -74,6 +135,21 @@ class MasterItemsController extends Controller
         $data_item->save();
 
         return redirect('master-items');
+    }
+
+    public function deleteImage($id)
+    {
+        $item = MasterItem::find($id);
+
+        if ($item && $item->image){
+            if (Storage::exists('public/master_items/' . $item->image)) {
+                Storage::delete('public/master_items/' . $item->image);
+            }
+            $item->image = null;
+            $item->save();
+        }
+
+        return redirect()->back()->with('success', 'Foto berhasil dihapus.');
     }
 
     public function delete($id)
